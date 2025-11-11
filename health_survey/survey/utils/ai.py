@@ -221,15 +221,40 @@ def generate_two_day_plan(
         fats = [it for it in items if has(it, "healthy-fat")]
         return proteins, carbs, vegs, fats
 
-    proteins, carbs, vegs, fats = _split(selected_meals or [])
+    # Allergy-aware filtering of selected meals
+    allergy_kws = _allergy_keywords_from_answers(answers or {})
+    base = _filter_allergy_items(selected_meals or [], allergy_kws)
+
+    proteins, carbs, vegs, fats = _split(base)
+    # Safe fallbacks if any class is empty after filtering
     if not proteins:
-        proteins = [{"name": "Grilled chicken", "tags": ["protein"]}]
+        p = _choose_first_safe(
+            ["Grilled chicken", "Roasted turkey", "Tofu (plant-based)"],
+            allergy_kws,
+            "Lean protein (grilled)"
+        )
+        proteins = [{"name": p, "tags": ["protein"]}]
     if not vegs:
-        vegs = [{"name": "Steamed spinach (efo)", "tags": ["veg"]}]
+        v = _choose_first_safe(
+            ["Steamed spinach (efo)", "Cabbage salad", "Sautéed kale"],
+            allergy_kws,
+            "Steamed leafy vegetables"
+        )
+        vegs = [{"name": v, "tags": ["veg"]}]
     if not fats:
-        fats = [{"name": "Olive oil (1 tsp)", "tags": ["healthy-fat"]}]
+        f = _choose_first_safe(
+            ["Olive oil (1 tsp)", "Avocado (quarter)", "Flaxseed (1 tbsp)"],
+            allergy_kws,
+            "Olive oil (1 tsp)"
+        )
+        fats = [{"name": f, "tags": ["healthy-fat"]}]
     if not carbs:
-        carbs = [{"name": "Small portion of brown rice", "tags": ["lunch-carb"]}]
+        c = _choose_first_safe(
+            ["Small portion of brown rice", "Small portion of boiled yam", "Small portion of sweet potato"],
+            allergy_kws,
+            "Small portion of brown rice"
+        )
+        carbs = [{"name": c, "tags": ["lunch-carb"]}]
 
     def zero_carb_text(i: int) -> str:
         p = proteins[i % len(proteins)]["name"]
@@ -272,16 +297,60 @@ def generate_month_plan(
         fats = [it for it in items if has(it, "healthy-fat")]
         return proteins, carbs, vegs, fats
 
-    proteins, carbs, vegs, fats = _split(selected_meals or [])
-    # Fallback pools if any class is empty
+    # Allergy-aware filtering of selected meals first
+    allergy_kws = _allergy_keywords_from_answers(answers or {})
+    base = _filter_allergy_items(selected_meals or [], allergy_kws)
+
+    proteins, carbs, vegs, fats = _split(base)
+    # Fallback pools if any class is empty (pick safe options w.r.t allergies)
     if not proteins:
-        proteins = [{"name": "Grilled chicken", "tags": ["protein"]}, {"name": "Boiled eggs", "tags": ["protein"]}]
+        p1 = _choose_first_safe(
+            ["Grilled chicken", "Roasted turkey", "Tofu (plant-based)"],
+            allergy_kws,
+            "Lean protein (grilled)"
+        )
+        p2 = _choose_first_safe(
+            ["Boiled chicken", "Pan-seared tilapia", "Tofu (plant-based)"],
+            allergy_kws,
+            "Lean protein (boiled)"
+        )
+        proteins = [{"name": p1, "tags": ["protein"]}, {"name": p2, "tags": ["protein"]}]
     if not vegs:
-        vegs = [{"name": "Steamed spinach (efo)", "tags": ["veg"]}, {"name": "Cabbage salad", "tags": ["veg"]}]
+        v1 = _choose_first_safe(
+            ["Steamed spinach (efo)", "Cabbage salad", "Sautéed kale"],
+            allergy_kws,
+            "Steamed leafy vegetables"
+        )
+        v2 = _choose_first_safe(
+            ["Okra stir-fry", "Lettuce salad", "Broccoli (steamed)"],
+            allergy_kws,
+            "Mixed vegetables (steamed)"
+        )
+        vegs = [{"name": v1, "tags": ["veg"]}, {"name": v2, "tags": ["veg"]}]
     if not fats:
-        fats = [{"name": "Olive oil (1 tsp)", "tags": ["healthy-fat"]}, {"name": "Avocado (quarter)", "tags": ["healthy-fat"]}]
+        f1 = _choose_first_safe(
+            ["Olive oil (1 tsp)", "Avocado (quarter)", "Flaxseed (1 tbsp)"],
+            allergy_kws,
+            "Olive oil (1 tsp)"
+        )
+        f2 = _choose_first_safe(
+            ["Groundnuts (handful)", "Walnuts (handful)", "Chia seeds (1 tbsp)"],
+            allergy_kws,
+            "Olive oil (1 tsp)"
+        )
+        fats = [{"name": f1, "tags": ["healthy-fat"]}, {"name": f2, "tags": ["healthy-fat"]}]
     if not carbs:
-        carbs = [{"name": "Small portion of brown rice", "tags": ["lunch-carb"]}, {"name": "Small portion of boiled yam", "tags": ["lunch-carb"]}]
+        c1 = _choose_first_safe(
+            ["Small portion of brown rice", "Small portion of boiled yam", "Small portion of sweet potato"],
+            allergy_kws,
+            "Small portion of brown rice"
+        )
+        c2 = _choose_first_safe(
+            ["Small portion of ofada rice", "Small portion of plantain", "Small portion of couscous"],
+            allergy_kws,
+            "Small portion of boiled yam"
+        )
+        carbs = [{"name": c1, "tags": ["lunch-carb"]}, {"name": c2, "tags": ["lunch-carb"]}]
 
     # Portion strictness based on level
     lvl = 1

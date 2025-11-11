@@ -208,9 +208,22 @@ class SubmitAnswersView(APIView):
                 hundred_meals=meals,
             )
 
+        # Compute stage-based recommendations to show immediately after assessment
+        mp = MealPlanSerializer(plan).data
+        try:
+            lvl = int(assessment_result.get("level") or 1)
+        except Exception:
+            lvl = 1
+        recommended = assessment.pick_recommended_meals(category, lvl, meals or [])
+        diet = assessment.get_diet_recommendations(category, lvl)
+        stage_template = assessment.get_stage_template(category, lvl, hundred_meals=meals or [], answers=answers)
+        mp["recommended_meals"] = recommended
+        mp["diet"] = diet
+        mp["stage_template"] = stage_template
+
         return success(
             message="Answers submitted. Meal options generated.",
-            data={"meal_plan": MealPlanSerializer(plan).data},
+            data={"meal_plan": mp},
             http_status=drf_status.HTTP_201_CREATED,
         )
 

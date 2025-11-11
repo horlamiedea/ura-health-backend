@@ -267,3 +267,388 @@ def assess_level(category: str, answers: Dict[str, Any]) -> Dict[str, Any]:
 
     # 2) Fallback: deterministic rules
     return _deterministic_assessment(category, answers)
+
+
+# -----------------------
+# Diet guidance utilities
+# -----------------------
+def get_diet_recommendations(category: str, level: int) -> Dict[str, Any]:
+    """
+    Return diet guidance text (title + bullets) per category/level based on provided spec.
+    Purely deterministic. Safe language only (not medical advice).
+    """
+    cat = (category or "").lower()
+    lvl = level if level in (1, 2, 3) else 1
+
+    def pack(title: str, bullets: list[str]) -> Dict[str, Any]:
+        return {"title": title, "bullets": bullets}
+
+    if cat == "diabetes":
+        if lvl == 1:
+            return pack(
+                "Diabetes • Level 1 – Mild (Prediabetes)",
+                [
+                    "Early morning tea; breakfast with vegetables + protein or low‑carb option.",
+                    "Lunch: one Nigerian carbohydrate + vegetables + protein.",
+                    "Dinner: zero‑carb (protein + vegetables + healthy fat).",
+                    "Avoid refined sugar/flour; exercise ~30 mins/day; check blood sugar weekly.",
+                ],
+            )
+        if lvl == 2:
+            return pack(
+                "Diabetes • Level 2 – Moderate (Controlled/Developing)",
+                [
+                    "Breakfast and dinner: zero‑carb (protein + vegetables + healthy fat).",
+                    "Lunch: one small carbohydrate + vegetables + protein.",
+                    "Control portions; avoid fried foods; keep regular mealtimes.",
+                ],
+            )
+        return pack(
+            "Diabetes • Level 3 – Severe (Uncontrolled)",
+            [
+                "Strict zero‑carb breakfast/dinner; lunch is a small carbohydrate + vegetables + protein.",
+                "Tight glycemic control focus; aim for remission with clinician oversight.",
+            ],
+        )
+
+    if cat in ("hbp", "high blood pressure", "hypertension"):
+        if lvl == 1:
+            return pack(
+                "Hypertension • Level 1 – Mild (Prehypertension)",
+                [
+                    "Reduce salt and processed foods; hydrate (3–4 L/day as tolerated).",
+                    "Regular physical activity such as daily walks.",
+                ],
+            )
+        if lvl == 2:
+            return pack(
+                "Hypertension • Level 2 – Moderate (Stage 1)",
+                [
+                    "Low‑sodium pattern; include turmeric/probiotic vegetables where possible.",
+                    "Tea with meals; monitor blood pressure daily.",
+                ],
+            )
+        return pack(
+            "Hypertension • Level 3 – Severe (Stage 2)",
+            [
+                "Strict low‑sodium, low‑fat plan; avoid canned foods and red meat.",
+                "Herbal teas (hibiscus with ginger & cinnamon); regular follow‑up care.",
+            ],
+        )
+
+    if cat in ("weight", "weight management", "obesity"):
+        if lvl == 1:
+            return pack(
+                "Weight • Level 1 – Mild (Overweight)",
+                [
+                    "Portion control (~25% reduction); avoid late‑night meals.",
+                    "Walk 30–45 mins/day.",
+                ],
+            )
+        if lvl == 2:
+            return pack(
+                "Weight • Level 2 – Moderate (Obese I–II)",
+                [
+                    "Eliminate fried foods/sugary drinks; drink warm water before meals.",
+                    "Track progress weekly.",
+                ],
+            )
+        return pack(
+            "Weight • Level 3 – Severe (Morbid Obesity)",
+            [
+                "Strict calorie restriction; no sugar/flour/alcohol.",
+                "Medical supervision recommended.",
+            ],
+        )
+
+    # Detox or unknown
+    return {
+        "title": "Detox • General guidance",
+        "bullets": [
+            "Emphasis on vegetables, lean proteins, and hydration.",
+            "Avoid ultra‑processed foods and excess sugars.",
+        ],
+    }
+
+
+def pick_recommended_meals(category: str, level: int, hundred_meals: list[dict[str, Any]], limit: int = 24) -> list[dict[str, Any]]:
+    """
+    Deterministically pick a stage‑appropriate subset from the 100‑meal catalog.
+    Uses tags: 'protein', 'veg'/'vegetables', 'healthy-fat', 'lunch-carb'/'carb', 'zero-carb-suitable'.
+    """
+    def has_tag(item: dict[str, Any], tag: str) -> bool:
+        return tag in [str(t).lower() for t in (item.get("tags") or [])]
+
+    proteins = [it for it in hundred_meals if has_tag(it, "protein")]
+    vegs = [it for it in hundred_meals if has_tag(it, "veg") or has_tag(it, "vegetables")]
+    fats = [it for it in hundred_meals if has_tag(it, "healthy-fat")]
+    carbs = [it for it in hundred_meals if has_tag(it, "lunch-carb") or has_tag(it, "carb")]
+
+    # Carb emphasis decreases with severity
+    lvl = level if level in (1, 2, 3) else 1
+    carb_quota = 6 if lvl == 1 else (4 if lvl == 2 else 2)
+    protein_quota = 8 if lvl >= 2 else 6
+    veg_quota = 8
+    fat_quota = 4
+
+    # Assemble deterministically (stable order), then trim and dedupe by id
+    rec = []
+    rec.extend(proteins[:protein_quota])
+    rec.extend(vegs[:veg_quota])
+    rec.extend(fats[:fat_quota])
+    rec.extend(carbs[:carb_quota])
+
+    # Deduplicate by id and keep original order
+    seen_ids = set()
+    out: list[dict[str, Any]] = []
+    for it in rec:
+        iid = it.get("id")
+        if iid in seen_ids:
+            continue
+        seen_ids.add(iid)
+        out.append({"id": iid, "name": it.get("name"), "tags": it.get("tags")})
+
+    if limit and len(out) > limit:
+        out = out[:limit]
+    return out
+
+
+def get_stage_template(
+    category: str,
+    level: int,
+    hundred_meals: list[dict[str, Any]] | None = None,
+    answers: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
+    """
+    Deterministic stage template text that mirrors the exact structure requested,
+    but with vague references (e.g., "as listed previously") resolved into explicit
+    Nigerian meal examples tailored to the user's condition and allergies.
+
+    Keys:
+      - title
+      - early_morning (optional)
+      - breakfast
+      - lunch
+      - snack
+      - dinner
+      - recommendation (list[str])
+    """
+    cat = (category or "").lower()
+    lvl = level if level in (1, 2, 3) else 1
+    items = hundred_meals or []
+    ans = answers or {}
+
+    # Allergy handling
+    def _allergy_keywords(a: Dict[str, Any]) -> set[str]:
+        # Look for any answer field that mentions 'allerg'
+        text = ""
+        for k, v in a.items():
+            if "allerg" in str(k).lower():
+                text += f" {v}"
+        kws = set()
+        for raw in str(text).lower().replace("/", " ").replace("|", " ").replace("&", " ").replace(";", " ").split(","):
+            token = raw.strip()
+            if not token:
+                continue
+            # split further by whitespace to capture single words like 'egg', 'fish'
+            for w in token.split():
+                if len(w) >= 3:
+                    kws.add(w)
+        return kws
+
+    allergy_kws = _allergy_keywords(ans)
+
+    def _has_tag(it: dict[str, Any], tag: str) -> bool:
+        return tag in [str(t).lower() for t in (it.get("tags") or [])]
+
+    def _filter_allergies(pool: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        if not allergy_kws:
+            return pool
+        out: list[dict[str, Any]] = []
+        for it in pool:
+            name = str(it.get("name") or "").lower()
+            if any(kw in name for kw in allergy_kws):
+                continue
+            out.append(it)
+        return out
+
+    def _split_catalog(items: list[dict[str, Any]]):
+        proteins = _filter_allergies([it for it in items if _has_tag(it, "protein")])
+        vegs = _filter_allergies([it for it in items if _has_tag(it, "veg") or _has_tag(it, "vegetables")])
+        fats = _filter_allergies([it for it in items if _has_tag(it, "healthy-fat")])
+        carbs = _filter_allergies([it for it in items if _has_tag(it, "lunch-carb") or _has_tag(it, "carb")])
+        # Robust fallbacks if filtering removes everything
+        if not proteins:
+            proteins = [{"name": "Grilled turkey (lean)", "tags": ["protein"]}]
+        if not vegs:
+            vegs = [{"name": "Steamed spinach (efo)", "tags": ["veg"]}]
+        if not fats:
+            fats = [{"name": "Olive oil (1 tsp)", "tags": ["healthy-fat"]}]
+        if not carbs:
+            carbs = [{"name": "Small portion of brown rice", "tags": ["lunch-carb"]}]
+        return proteins, carbs, vegs, fats
+
+    proteins, carbs, vegs, fats = _split_catalog(items)
+
+    def _choose(pool: list[dict[str, Any]], i: int) -> str:
+        return str(pool[i % len(pool)]["name"])
+
+    def _zero_carb(i: int) -> str:
+        p = _choose(proteins, i)
+        v = _choose(vegs, i * 2)
+        f = _choose(fats, i * 3)
+        return f"{p} with {v.lower()} ({f})"
+
+    def _lunch(i: int, portion_prefix: str) -> str:
+        c = _choose(carbs, i)
+        # normalize carb string to include portion prefix if not present
+        if "portion of" not in c.lower():
+            c = f"{portion_prefix} {c}"
+        p = _choose(proteins, i + 1).lower()
+        v = _choose(vegs, i + 2).lower()
+        return f"{c} with {p} and {v}"
+
+    def _snack(i: int) -> str:
+        fat_item = _choose(fats, i)
+        return f"Herbal tea; {fat_item}"
+
+    def pack(title: str,
+             breakfast: str,
+             lunch: str,
+             snack: str,
+             dinner: str,
+             recommendation: list[str],
+             early_morning: str | None = None) -> Dict[str, Any]:
+        out: Dict[str, Any] = {
+            "title": title,
+            "breakfast": breakfast,
+            "lunch": lunch,
+            "snack": snack,
+            "dinner": dinner,
+            "recommendation": recommendation,
+        }
+        if early_morning:
+            out["early_morning"] = early_morning
+        return out
+
+    # Portion strictness rule (used for lunch composition)
+    portion_prefix = "moderate portion of" if lvl == 1 else ("small portion of" if lvl >= 2 else "moderate portion of")
+
+    # Diabetes: explicit examples (no vague phrases)
+    if cat == "diabetes":
+        if lvl == 1:
+            return pack(
+                "LEVEL 1 — MILD (Pre-diabetes)",
+                # Keep provided wording but include a concrete example as prefix
+                f"{_zero_carb(0)}; or vegetable smoothie + protein; or a slice of bread with vegetables and protein; low‑carb English breakfast",
+                _lunch(0, portion_prefix="moderate portion of"),
+                _snack(0),
+                _zero_carb(1),
+                [
+                    "Avoid refined sugar and flour.",
+                    "Exercise 30 mins/day.",
+                    "Check blood sugar weekly.",
+                ],
+                early_morning="Early morning hours (6am-8am) a cup of tea",
+            )
+        if lvl == 2:
+            return pack(
+                "LEVEL 2 — MODERATE",
+                _zero_carb(2),
+                _lunch(1, portion_prefix="small portion of"),
+                _snack(1),
+                _zero_carb(3),
+                [
+                    "Control carbohydrate portions.",
+                    "Avoid fried foods.",
+                    "Maintain regular mealtime.",
+                ],
+            )
+        # Level 3
+        return pack(
+            "LEVEL 3 — SEVERE",
+            _zero_carb(4),
+            _lunch(2, portion_prefix="small portion of"),
+            _snack(2),
+            _zero_carb(5),
+            [
+                "Include 1 day of fasting with vegetable smoothies + protein and vegetable salad weekly.",
+                "Strict low-GI diet.",
+                "Avoid sugary fruits & processed food.",
+                "Regular doctor review.",
+            ],
+        )
+
+    # Hypertension: breakfast/lunch/snack/dinner align with equivalent diabetes level
+    if cat in ("hbp", "high blood pressure", "hypertension"):
+        dia = get_stage_template("diabetes", lvl, hundred_meals=items, answers=ans)
+        if lvl == 1:
+            recs = [
+                "Reduce salt and processed foods.",
+                "Hydrate well.(3-4liters of water daily)",
+                "Engage in regular walks. (90 minutes daily)",
+            ]
+        elif lvl == 2:
+            recs = [
+                "Include turmeric probiotics elixir & probiotic vegetable to daily diet",
+                "includ tea to each meal",
+                "Monitor BP daily.",
+            ]
+        else:
+            recs = [
+                "Strict low-sodium, low-fat plan.",
+                "Avoid canned foods & red meat.",
+                "Include probiotic turmeric elixir and probiotic vegetables.",
+                "Tea should be made with Herbiscus, ginger & cinnamon.",
+                "Regular follow-up care.",
+            ]
+        return pack(
+            f"LEVEL {lvl} — {'MILD' if lvl==1 else 'MODERATE' if lvl==2 else 'SEVERE'}",
+            dia.get("breakfast", _zero_carb(0)),
+            dia.get("lunch", _lunch(0, portion_prefix)),
+            dia.get("snack", _snack(0)),
+            dia.get("dinner", _zero_carb(1)),
+            recs,
+        )
+
+    # Weight/Obesity: align with equivalent diabetes level for meals
+    if cat in ("weight", "weight management", "obesity"):
+        dia = get_stage_template("diabetes", lvl, hundred_meals=items, answers=ans)
+        if lvl == 1:
+            recs = [
+                "Portion control (reduce serving size by 25%).",
+                "Avoid late-night meals.",
+                "Walk 30–45 mins/day.",
+            ]
+        elif lvl == 2:
+            recs = [
+                "Eliminate fried foods & sugary drinks.",
+                "Drink warm water before meals.",
+                "Track weekly progress.",
+            ]
+        else:
+            recs = [
+                "Strict calorie restriction.",
+                "No sugar, flour, or alcohol.",
+                "Medical supervision advised.",
+            ]
+        # Level 3 spec mentioned snack: Herbal tea; keep explicit
+        snack_text = "Herbal tea" if lvl == 3 else dia.get("snack", _snack(0))
+        return pack(
+            f"LEVEL {lvl} — {'MILD' if lvl==1 else 'MODERATE' if lvl==2 else 'SEVERE'}",
+            dia.get("breakfast", _zero_carb(0)),
+            dia.get("lunch", _lunch(0, portion_prefix)),
+            snack_text,
+            dia.get("dinner", _zero_carb(1)),
+            recs,
+        )
+
+    # Detox or unknown: keep minimal guidance with examples
+    return {
+        "title": "General wellness template",
+        "breakfast": _zero_carb(0),
+        "lunch": _lunch(0, portion_prefix="moderate portion of"),
+        "snack": _snack(0),
+        "dinner": _zero_carb(1),
+        "recommendation": ["Hydrate well.", "Avoid ultra-processed foods."],
+    }
