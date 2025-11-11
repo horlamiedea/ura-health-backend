@@ -202,6 +202,52 @@ def generate_hundred_meals(category: str, answers: Dict[str, Any]) -> List[Dict[
     return all_items
 
 
+def _allergy_keywords_from_answers(answers: Dict[str, Any]) -> set[str]:
+    """
+    Extract a set of allergy-related keywords from the provided answers dict.
+    Scans any answer field whose key mentions 'allerg' and tokenizes into words.
+    """
+    text = ""
+    for k, v in (answers or {}).items():
+        if "allerg" in str(k).lower():
+            text += f" {v}"
+    kws: set[str] = set()
+    for raw in str(text).lower().replace("/", " ").replace("|", " ").replace("&", " ").replace(";", " ").split(","):
+        token = raw.strip()
+        if not token:
+            continue
+        for w in token.split():
+            if len(w) >= 3:
+                kws.add(w)
+    return kws
+
+
+def _filter_allergy_items(items: List[Dict[str, Any]], allergy_kws: set[str]) -> List[Dict[str, Any]]:
+    """
+    Filter out any items whose 'name' contains any of the allergy keywords.
+    """
+    if not allergy_kws:
+        return items
+    out: List[Dict[str, Any]] = []
+    for it in items:
+        name = str(it.get("name") or "").lower()
+        if any(kw in name for kw in allergy_kws):
+            continue
+        out.append(it)
+    return out
+
+
+def _choose_first_safe(options: List[str], allergy_kws: set[str], fallback: str) -> str:
+    """
+    Choose the first option that does not contain any allergy keyword; otherwise return fallback.
+    """
+    for opt in options:
+        nm = str(opt).lower()
+        if not any(kw in nm for kw in allergy_kws):
+            return opt
+    return fallback
+
+
 def generate_two_day_plan(
     category: str,
     selected_meals: List[Dict[str, Any]],
