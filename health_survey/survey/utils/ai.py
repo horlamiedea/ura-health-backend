@@ -202,50 +202,58 @@ def generate_hundred_meals(category: str, answers: Dict[str, Any]) -> List[Dict[
     return all_items
 
 
-def _allergy_keywords_from_answers(answers: Dict[str, Any]) -> set[str]:
+def _allergy_keywords_from_answers(answers: Dict[str, Any]) -> List[str]:
     """
-    Extract a set of allergy-related keywords from the provided answers dict.
-    Scans any answer field whose key mentions 'allerg' and tokenizes into words.
+    Extract allergy keywords from user answers.
     """
-    text = ""
-    for k, v in (answers or {}).items():
-        if "allerg" in str(k).lower():
-            text += f" {v}"
-    kws: set[str] = set()
-    for raw in str(text).lower().replace("/", " ").replace("|", " ").replace("&", " ").replace(";", " ").split(","):
-        token = raw.strip()
-        if not token:
-            continue
-        for w in token.split():
-            if len(w) >= 3:
-                kws.add(w)
-    return kws
+    keywords = []
+    # Common allergy questions/keys
+    for key, value in answers.items():
+        k = key.lower()
+        v = str(value).lower()
+        if "allerg" in k or "intoleran" in k:
+            # simplistic extraction: look for common allergens in the answer
+            common = ["nut", "peanut", "milk", "dairy", "egg", "fish", "shellfish", "wheat", "gluten", "soy"]
+            for c in common:
+                if c in v:
+                    keywords.append(c)
+    return keywords
 
 
-def _filter_allergy_items(items: List[Dict[str, Any]], allergy_kws: set[str]) -> List[Dict[str, Any]]:
+def _filter_allergy_items(items: List[Dict[str, Any]], allergy_kws: List[str]) -> List[Dict[str, Any]]:
     """
-    Filter out any items whose 'name' contains any of the allergy keywords.
+    Filter out items that match allergy keywords.
     """
     if not allergy_kws:
         return items
-    out: List[Dict[str, Any]] = []
-    for it in items:
-        name = str(it.get("name") or "").lower()
-        if any(kw in name for kw in allergy_kws):
-            continue
-        out.append(it)
+    out = []
+    for item in items:
+        name = item.get("name", "").lower()
+        tags = [t.lower() for t in item.get("tags", [])]
+        # Check if any keyword is in name or tags
+        safe = True
+        for kw in allergy_kws:
+            if kw in name or any(kw in t for t in tags):
+                safe = False
+                break
+        if safe:
+            out.append(item)
     return out
 
 
-def _choose_first_safe(options: List[str], allergy_kws: set[str], fallback: str) -> str:
+def _choose_first_safe(options: List[str], allergy_kws: List[str], default: str) -> str:
     """
-    Choose the first option that does not contain any allergy keyword; otherwise return fallback.
+    Choose the first option that doesn't match allergy keywords.
     """
     for opt in options:
-        nm = str(opt).lower()
-        if not any(kw in nm for kw in allergy_kws):
+        safe = True
+        for kw in allergy_kws:
+            if kw in opt.lower():
+                safe = False
+                break
+        if safe:
             return opt
-    return fallback
+    return default
 
 
 def generate_two_day_plan(

@@ -151,15 +151,6 @@ Errors:
 ```json
 { "status":"error", "message":"Email is required for guests." }
 ```
-- Free plan already exists for this email (free-once rule):
-```json
-{
-  "status": "error",
-  "message": "A free plan already exists for this email. Please upgrade to access the monthly plan.",
-  "errors": { "email": ["Free plan already used."] },
-  "data": { "existing_plan": { "id": 1, "...": "..." } }
-}
-```
 
 ---
 
@@ -233,5 +224,5 @@ Success:
 ## Tips
 
 - Ensure `OPENAI_API_KEY` is set before calling AI-backed endpoints.
-- Free-once rule applies per email across categories when a free plan exists without a paid plan.
+- Free-once rule is enforced at the select_meals (2-day plan) endpoint per email across categories when a free plan exists without a paid plan; submit_answers is not blocked and can be called multiple times per email/category.
 - For authenticated users, ensure the Django `User.email` field is set; otherwise `submit_answers` will reject.

@@ -16,6 +16,10 @@ class GuestStartSerializer(serializers.ModelSerializer):
             "address",
             "occupation",
         ]
+        # Skip uniqueness validation for email since the view handles it via update_or_create
+        extra_kwargs = {
+            "email": {"validators": []},
+        }
 
 
 class SubmitAnswersSerializer(serializers.Serializer):
